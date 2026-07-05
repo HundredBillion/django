@@ -26,6 +26,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     can_release_savepoints = True
     supports_comments = True
     supports_independent_comment_alteration = True
+    supports_schema_qualified_table_references = True
     supports_tablespaces = True
     supports_transactions = True
     can_introspect_materialized_views = True
