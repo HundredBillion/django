@@ -473,6 +473,7 @@ Models
   not supported for that option.
 * **models.E050**: The model cannot have related fields with both
   database-level and Python-level ``on_delete`` variants.
+
 Management Commands
 -------------------
 
