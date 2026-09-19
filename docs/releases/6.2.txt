@@ -207,7 +207,8 @@ Migrations
 Models
 ~~~~~~
 
-* ...
+* The new :class:`~django.db.models.SchemaQualifiedTable` class allows managed
+  and unmanaged models to use PostgreSQL tables outside the default schema.
 
 Requests and Responses
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -283,7 +284,12 @@ Database backend API
 This section describes changes that may be needed in third-party database
 backends.
 
-* ...
+* Third-party database backends that support
+  :class:`~django.db.models.SchemaQualifiedTable` should set
+  ``BaseDatabaseFeatures.supports_schema_qualified_table_references`` to
+  ``True``. They should also override
+  ``BaseDatabaseIntrospection.table_exists()`` and make table-specific
+  introspection methods understand structured table references.
 
 :mod:`django.contrib.admin`
 ---------------------------

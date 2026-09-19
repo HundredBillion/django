@@ -4,7 +4,15 @@ from django.db.backends.base.introspection import BaseDatabaseIntrospection
 from django.db.backends.base.introspection import FieldInfo as BaseFieldInfo
 from django.db.backends.base.introspection import TableInfo as BaseTableInfo
 from django.db.backends.postgresql.base import psycopg_version
-from django.db.models import DB_CASCADE, DB_SET_DEFAULT, DB_SET_NULL, DO_NOTHING, Index
+from django.db.backends.utils import split_identifier
+from django.db.models import (
+    DB_CASCADE,
+    DB_SET_DEFAULT,
+    DB_SET_NULL,
+    DO_NOTHING,
+    Index,
+    SchemaQualifiedTable,
+)
 
 FieldInfo = namedtuple("FieldInfo", [*BaseFieldInfo._fields, "is_autofield", "comment"])
 TableInfo = namedtuple("TableInfo", [*BaseTableInfo._fields, "comment"])
@@ -85,6 +93,32 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             if row[0] not in self.ignored_tables
         ]
 
+    def table_exists(self, table_name, cursor=None):
+        schema_name, unqualified_table_name = split_identifier(table_name)
+        if not schema_name:
+            return super().table_exists(table_name, cursor)
+
+        def exists(cursor):
+            cursor.execute(
+                """
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM pg_catalog.pg_class c
+                    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = %s
+                        AND n.nspname = %s
+                        AND c.relkind IN ('f', 'm', 'p', 'r', 'v')
+                )
+                """,
+                [unqualified_table_name, schema_name],
+            )
+            return cursor.fetchone()[0]
+
+        if cursor is None:
+            with self.connection.cursor() as cursor:
+                return exists(cursor)
+        return exists(cursor)
+
     def get_table_description(self, cursor, table_name):
         """
         Return a description of the table with the DB-API cursor.description
@@ -93,6 +127,13 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         # Query the pg_catalog tables as cursor.description does not reliably
         # return the nullable property and information_schema.columns does not
         # contain details of materialized views.
+        schema_name, unqualified_table_name = split_identifier(table_name)
+        if schema_name:
+            namespace_condition = "AND n.nspname = %s"
+            namespace_params = [schema_name]
+        else:
+            namespace_condition = "AND pg_catalog.pg_table_is_visible(c.oid)"
+            namespace_params = []
         cursor.execute(
             """
             SELECT
@@ -111,13 +152,14 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             WHERE c.relkind IN ('f', 'm', 'p', 'r', 'v')
                 AND c.relname = %s
                 AND n.nspname NOT IN ('pg_catalog', 'pg_toast')
-                AND pg_catalog.pg_table_is_visible(c.oid)
-        """,
-            [table_name],
+                {namespace_condition}
+        """.format(namespace_condition=namespace_condition),
+            [unqualified_table_name, *namespace_params],
         )
         field_map = {line[0]: line[1:] for line in cursor.fetchall()}
         cursor.execute(
-            "SELECT * FROM %s LIMIT 1" % self.connection.ops.quote_name(table_name)
+            "SELECT * FROM %s LIMIT 1"
+            % self.connection.ops.quote_table_name(table_name)
         )
 
         # PostgreSQL OIDs may vary depending on the installation, especially
@@ -145,6 +187,13 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         ]
 
     def get_sequences(self, cursor, table_name, table_fields=()):
+        schema_name, unqualified_table_name = split_identifier(table_name)
+        if schema_name:
+            namespace_condition = "AND tbl_ns.nspname = %s"
+            namespace_params = [schema_name]
+        else:
+            namespace_condition = "AND pg_catalog.pg_table_is_visible(tbl.oid)"
+            namespace_params = []
         cursor.execute(
             """
             SELECT
@@ -159,11 +208,12 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                     AND d.refobjsubid = a.attnum
                 JOIN pg_class tbl ON tbl.oid = d.refobjid
                     AND tbl.relname = %s
-                    AND pg_catalog.pg_table_is_visible(tbl.oid)
+                JOIN pg_namespace tbl_ns ON tbl_ns.oid = tbl.relnamespace
             WHERE
-                s.relkind = 'S';
-        """,
-            [table_name],
+                s.relkind = 'S'
+                {namespace_condition};
+        """.format(namespace_condition=namespace_condition),
+            [unqualified_table_name, *namespace_params],
         )
         return [
             {"name": row[0], "table": table_name, "column": row[1]}
@@ -178,12 +228,28 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             }
         representing all foreign keys in the given table.
         """
+        schema_name, unqualified_table_name = split_identifier(table_name)
+        if schema_name:
+            namespace_condition = "AND n1.nspname = %s"
+            namespace_params = [schema_name]
+            same_namespace_condition = ""
+        else:
+            namespace_condition = "AND pg_catalog.pg_table_is_visible(c1.oid)"
+            namespace_params = []
+            same_namespace_condition = "AND c1.relnamespace = c2.relnamespace"
         cursor.execute(
             """
-            SELECT a1.attname, c2.relname, a2.attname, con.confdeltype
+            SELECT
+                a1.attname,
+                c2.relname,
+                a2.attname,
+                con.confdeltype,
+                n2.nspname
             FROM pg_constraint con
             LEFT JOIN pg_class c1 ON con.conrelid = c1.oid
             LEFT JOIN pg_class c2 ON con.confrelid = c2.oid
+            LEFT JOIN pg_namespace n1 ON c1.relnamespace = n1.oid
+            LEFT JOIN pg_namespace n2 ON c2.relnamespace = n2.oid
             LEFT JOIN
                 pg_attribute a1 ON c1.oid = a1.attrelid AND a1.attnum = con.conkey[1]
             LEFT JOIN
@@ -191,13 +257,24 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             WHERE
                 c1.relname = %s AND
                 con.contype = 'f' AND
-                c1.relnamespace = c2.relnamespace AND
-                pg_catalog.pg_table_is_visible(c1.oid)
-        """,
-            [table_name],
+                TRUE {same_namespace_condition}
+                {namespace_condition}
+        """.format(
+                namespace_condition=namespace_condition,
+                same_namespace_condition=same_namespace_condition,
+            ),
+            [unqualified_table_name, *namespace_params],
         )
         return {
-            row[0]: (row[2], row[1], self.on_delete_types.get(row[3]))
+            row[0]: (
+                row[2],
+                (
+                    SchemaQualifiedTable(row[1], schema=row[4])
+                    if schema_name
+                    else row[1]
+                ),
+                self.on_delete_types.get(row[3]),
+            )
             for row in cursor.fetchall()
         }
 
@@ -207,6 +284,13 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         one or more columns. Also retrieve the definition of expression-based
         indexes.
         """
+        schema_name, table_name = split_identifier(table_name)
+        if schema_name:
+            namespace_condition = "AND n.nspname = %s"
+            namespace_params = [schema_name]
+        else:
+            namespace_condition = "AND pg_catalog.pg_table_is_visible(cl.oid)"
+            namespace_params = []
         constraints = {}
         # Loop over the key table, collecting things as constraints. The column
         # array must return column names in the same order in which they were
@@ -223,25 +307,46 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                     ORDER BY cols.arridx
                 ),
                 c.contype,
-                (SELECT fkc.relname || '.' || fka.attname
+                (SELECT fka.attname
                 FROM pg_attribute AS fka
-                JOIN pg_class AS fkc ON fka.attrelid = fkc.oid
                 WHERE fka.attrelid = c.confrelid AND fka.attnum = c.confkey[1]),
+                fcl.relname,
+                fn.nspname,
                 cl.reloptions
             FROM pg_constraint AS c
             JOIN pg_class AS cl ON c.conrelid = cl.oid
+            JOIN pg_namespace AS n ON cl.relnamespace = n.oid
+            LEFT JOIN pg_class AS fcl ON c.confrelid = fcl.oid
+            LEFT JOIN pg_namespace AS fn ON fcl.relnamespace = fn.oid
             WHERE cl.relname = %s
-                AND pg_catalog.pg_table_is_visible(cl.oid)
+                {namespace_condition}
                 AND c.contype != 'n'
-        """,
-            [table_name],
+        """.format(namespace_condition=namespace_condition),
+            [table_name, *namespace_params],
         )
-        for constraint, columns, kind, used_cols, options in cursor.fetchall():
+        for (
+            constraint,
+            columns,
+            kind,
+            foreign_column,
+            foreign_table,
+            foreign_schema,
+            options,
+        ) in cursor.fetchall():
+            if kind == "f":
+                if schema_name:
+                    foreign_table = SchemaQualifiedTable(
+                        foreign_table,
+                        schema=foreign_schema,
+                    )
+                foreign_key = (foreign_table, foreign_column)
+            else:
+                foreign_key = None
             constraints[constraint] = {
                 "columns": columns,
                 "primary_key": kind == "p",
                 "unique": kind in ["p", "u"],
-                "foreign_key": tuple(used_cols.split(".", 1)) if kind == "f" else None,
+                "foreign_key": foreign_key,
                 "check": kind == "c",
                 "index": False,
                 "definition": None,
@@ -282,14 +387,15 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                 ) idx
                 LEFT JOIN pg_class c ON idx.indrelid = c.oid
                 LEFT JOIN pg_class c2 ON idx.indexrelid = c2.oid
+                LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
                 LEFT JOIN pg_am am ON c2.relam = am.oid
                 LEFT JOIN
                     pg_attribute attr ON attr.attrelid = c.oid AND attr.attnum = idx.key
-                WHERE c.relname = %s AND pg_catalog.pg_table_is_visible(c.oid)
+                WHERE c.relname = %s {namespace_condition}
             ) s2
             GROUP BY indexname, indisunique, indisprimary, amname, exprdef, attoptions;
-        """,
-            [self.index_default_access_method, table_name],
+        """.format(namespace_condition=namespace_condition.replace("cl.", "c.")),
+            [self.index_default_access_method, table_name, *namespace_params],
         )
         for (
             index,

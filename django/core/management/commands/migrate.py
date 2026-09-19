@@ -447,8 +447,12 @@ class Command(BaseCommand):
 
         def model_installed(model):
             opts = model._meta
+            if not opts.managed:
+                return False
             converter = connection.introspection.identifier_converter
             max_name_length = connection.ops.max_name_length()
+            if hasattr(opts.db_table, "identifier_parts"):
+                return not connection.introspection.table_exists(opts.db_table)
             return not (
                 (converter(truncate_name(opts.db_table, max_name_length)) in tables)
                 or (

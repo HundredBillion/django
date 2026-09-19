@@ -79,6 +79,22 @@ class BaseDatabaseIntrospection:
             "method"
         )
 
+    def table_exists(self, table_name, cursor=None):
+        """Return whether the table name exists in the database."""
+
+        def exists(cursor):
+            converter = self.identifier_converter
+            converted_name = converter(table_name)
+            return any(
+                converter(table.name) == converted_name
+                for table in self.get_table_list(cursor)
+            )
+
+        if cursor is None:
+            with self.connection.cursor() as cursor:
+                return exists(cursor)
+        return exists(cursor)
+
     def get_table_description(self, cursor, table_name):
         """
         Return a description of the table with the DB-API cursor.description
@@ -119,10 +135,19 @@ class BaseDatabaseIntrospection:
             )
         tables = list(tables)
         if only_existing:
-            existing_tables = set(self.table_names(include_views=include_views))
-            tables = [
-                t for t in tables if self.identifier_converter(t) in existing_tables
-            ]
+            with self.connection.cursor() as cursor:
+                existing_tables = set(
+                    self.table_names(cursor, include_views=include_views)
+                )
+                tables = [
+                    table
+                    for table in tables
+                    if (
+                        self.table_exists(table, cursor)
+                        if hasattr(table, "identifier_parts")
+                        else self.identifier_converter(table) in existing_tables
+                    )
+                ]
         return tables
 
     def installed_models(self, tables):

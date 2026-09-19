@@ -211,7 +211,7 @@ class BaseDatabaseSchemaEditor:
                 cursor.execute(sql, params)
 
     def quote_name(self, name):
-        return self.connection.ops.quote_name(name)
+        return self.connection.ops.quote_table_name(name)
 
     def table_sql(self, model):
         """Take a model and return its table definition."""

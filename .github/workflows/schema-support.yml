@@ -1,0 +1,98 @@
+name: PostgreSQL schema support
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/managed-postgresql-schemas
+      - release/schema-support-0.1
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  postgresql:
+    name: PostgreSQL ${{ matrix.postgresql }}, Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        postgresql:
+          - "16"
+          - "17"
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgresql }}
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Django and PostgreSQL test dependencies
+        run: python -m pip install -e . -r tests/requirements/postgres.txt
+      - name: Run schema support integration and regression tests
+        env:
+          DJANGO_TEST_POSTGRES_HOST: 127.0.0.1
+          DJANGO_TEST_POSTGRES_PASSWORD: postgres
+          DJANGO_TEST_POSTGRES_PORT: "5432"
+          DJANGO_TEST_POSTGRES_USER: postgres
+        run: >-
+          python -Wall tests/runtests.py
+          schema_qualified_tables
+          migrations.test_schema_qualified_tables
+          introspection
+          schema
+          postgres_tests.test_indexes
+          --settings=schema_qualified_tables.postgresql_settings
+          --verbosity 2
+          --parallel 2
+
+  compatibility:
+    name: SQLite compatibility, Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Django
+        run: python -m pip install -e .
+      - name: Run compatibility tests
+        run: >-
+          python -Wall tests/runtests.py
+          schema_qualified_tables
+          migrations
+          queries
+          invalid_models_tests
+          check_framework
+          model_options
+          many_to_many
+          m2m_through
+          --verbosity 2
+          --parallel 2

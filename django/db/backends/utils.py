@@ -274,6 +274,10 @@ def split_identifier(identifier):
     by a namespace.
     """
     try:
+        return identifier.identifier_parts
+    except AttributeError:
+        pass
+    try:
         namespace, name = identifier.split('"."')
     except ValueError:
         namespace, name = "", identifier
