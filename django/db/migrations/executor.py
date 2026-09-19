@@ -407,9 +407,7 @@ class MigrationExecutor:
                     else:
                         if fold_identifier_case:
                             through_db_table = through_db_table.casefold()
-                        through_table_exists = (
-                            through_db_table in existing_table_names
-                        )
+                        through_table_exists = through_db_table in existing_table_names
                     if not through_table_exists:
                         return False, project_state
                     else:

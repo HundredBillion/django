@@ -128,9 +128,9 @@ constraints are created in the model table's schema. An automatically created
 many-to-many intermediary table uses the schema of the model that declares the
 field.
 
-PostgreSQL introspection, :option:`migrate --fake-initial`, and :djadmin:`flush`
-use both the schema and table name. Consequently, identically named tables in
-different schemas remain distinct.
+PostgreSQL introspection, :option:`migrate --fake-initial`, and
+:djadmin:`flush` use both the schema and table name. Consequently, identically
+named tables in different schemas remain distinct.
 
 This is useful when the same table name exists in multiple schemas in the same
 database.

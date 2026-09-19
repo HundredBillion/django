@@ -1,0 +1,131 @@
+=====================================
+PostgreSQL schema support fork policy
+=====================================
+
+``schema-support-0.1.0`` is a downstream Django release that supports static,
+schema-qualified managed models on PostgreSQL. It is maintained as a narrow
+patch stack while equivalent functionality is reviewed upstream.
+
+Version baseline
+================
+
+The release is based on:
+
+* Django upstream commit ``935edaa91b756325352ca70d5eba49a64b70d28c``.
+* The schema-qualified table reference work from Django pull request #21757,
+  original commit ``d769fd1b4f2eee0bc1f5ddc2af26107bafe76bbd``.
+* The attributed rebase commit
+  ``a3bf50ee5a9bf7b91e0555aac8d14255e976ba89``.
+
+The project-owned commits are kept after that attributed patch so they can be
+replayed or submitted independently.
+
+Supported versions
+==================
+
+The first release supports:
+
+* Python 3.12.
+* PostgreSQL 16 and 17.
+* Static :class:`~django.db.models.SchemaQualifiedTable` values.
+
+Local release validation uses PostgreSQL 16.14. CI runs the focused acceptance
+and regression suites against PostgreSQL 16 and 17. The exact CI run is linked
+from the project release.
+
+Installation and pinning
+========================
+
+Applications must install an immutable tag or commit. After the release tag is
+published, a requirements file can pin it with:
+
+.. code-block:: text
+
+    Django @ git+https://github.com/HundredBillion/django.git@schema-support-0.1.0
+
+For deployments that require a commit pin, replace the tag with the release
+commit SHA. Do not install from ``feature/managed-postgresql-schemas`` or
+another moving branch.
+
+Create each schema before the first model migration, for example::
+
+    migrations.RunSQL(
+        "CREATE SCHEMA IF NOT EXISTS statements",
+        reverse_sql=migrations.RunSQL.noop,
+    )
+
+Ordinary reverse migrations must not use ``DROP SCHEMA ... CASCADE``.
+
+Upgrade procedure
+=================
+
+#. Fetch ``upstream/main`` and record the new upstream SHA.
+#. Rebase or replay the attributed pull request commit without changing its
+   author.
+#. Replay each project-owned commit separately and resolve conflicts with a
+   written explanation.
+#. Run the PostgreSQL schema-support workflow and the upstream regression
+   suites affected by each conflict.
+#. Publish a new immutable tag and update application pins only after CI
+   passes.
+
+Security releases take priority over feature work. Assess every Django security
+release immediately and publish a rebased fork release when the pinned baseline
+is affected.
+
+Supported behavior
+==================
+
+The release supports managed table creation and deletion, standard field
+changes, same- and cross-schema foreign keys, automatic many-to-many tables,
+indexes, unique and check constraints, forward and reverse migrations,
+``migrate --fake-initial``, ``flush``, and Django test databases. Ordinary
+string ``db_table`` values retain upstream behavior.
+
+Known limitations
+=================
+
+The following aren't supported by this release:
+
+* Dynamic or request-selected schemas.
+* Installing one model in multiple schemas.
+* Automatic schema creation or deletion as first-class migration operations.
+* Moving a table between schemas with ``AlterModelTable``.
+* Database role, ownership, or grant management.
+* Schema-qualified managed models on non-PostgreSQL backends.
+* Complete schema-aware ``inspectdb`` output.
+
+Test and release evidence
+=========================
+
+The focused workflow runs:
+
+* ``schema_qualified_tables``;
+* ``migrations.test_schema_qualified_tables``;
+* ``introspection``;
+* ``schema``;
+* ``postgres_tests.test_indexes``; and
+* SQLite migration, query, model-check, and many-to-many regression suites.
+
+The migration fixture creates duplicate table names in separate schemas,
+cross-schema relations, and an automatic many-to-many table. It applies,
+repeats, reverses, reapplies, and fake-applies the migration chain in a Django
+test database.
+
+Application integration
+=======================
+
+Applications should isolate the fork-specific API behind a small compatibility
+module containing approved schema constants and a startup feature check. Domain
+code should import only :class:`~django.db.models.SchemaQualifiedTable`, not
+private fork internals. Keep the application integration suite when returning
+to an official Django release.
+
+Upstream coordination
+=====================
+
+Pull request #21757 remains a separately attributed layer. Project-owned
+managed-table, relation, introspection, and release changes must be proposed as
+focused follow-ups after coordination with the current ticket and pull request
+owner. Any upstream proposal must disclose AI assistance in accordance with
+Django's contribution policy.
