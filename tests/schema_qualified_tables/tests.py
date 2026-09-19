@@ -1,6 +1,8 @@
 from unittest import mock
 
 from django.db import NotSupportedError, connection, models
+from django.db.migrations.operations.models import CreateModel
+from django.db.migrations.state import ProjectState
 from django.db.migrations.writer import MigrationWriter
 from django.db.models import sql
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
@@ -43,6 +45,26 @@ class SchemaQualifiedTableTests(TestCase):
             "doesn't support schema-qualified table references",
         ):
             table.as_sql_name(connection)
+
+    @isolate_apps("schema_qualified_tables")
+    def test_managed_schema_qualified_table_requires_backend_support(self):
+        self.set_schema_qualified_table_references_support(False)
+
+        class ManagedCustomer(models.Model):
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "customer",
+                    schema="billing",
+                )
+
+        editor = connection.schema_editor(collect_sql=True, atomic=False)
+        editor.deferred_sql = []
+        with self.assertRaisesMessage(
+            NotSupportedError,
+            "doesn't support schema-qualified table references",
+        ):
+            editor.create_model(ManagedCustomer)
 
     def test_select_uses_schema_qualified_table(self):
         self.set_schema_qualified_table_references_support(True)
@@ -148,7 +170,7 @@ class SchemaQualifiedTableTests(TestCase):
         self.assertEqual(imports, {"from django.db import models"})
 
     @isolate_apps("schema_qualified_tables")
-    def test_schema_qualified_table_requires_unmanaged_model(self):
+    def test_schema_qualified_table_allows_managed_model(self):
         class ManagedCustomer(models.Model):
             class Meta:
                 app_label = "schema_qualified_tables"
@@ -157,13 +179,7 @@ class SchemaQualifiedTableTests(TestCase):
                     schema="billing",
                 )
 
-        errors = ManagedCustomer.check()
-
-        self.assertEqual(errors[0].id, "models.E051")
-        self.assertEqual(
-            errors[0].msg,
-            "'managed' must be False when 'db_table' is a SchemaQualifiedTable.",
-        )
+        self.assertEqual(ManagedCustomer.check(), [])
 
 
 @skipUnlessDBFeature("supports_schema_qualified_table_references")
@@ -229,3 +245,137 @@ class SchemaQualifiedTableDatabaseTests(TransactionTestCase):
             BillingInvoice.objects.filter(pk=invoice.pk).delete()[0],
             1,
         )
+
+
+@skipUnlessDBFeature("supports_schema_qualified_table_references")
+class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
+    available_apps = ["schema_qualified_tables"]
+
+    def setUp(self):
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA managed_schema")
+        self.addCleanup(self.drop_schema)
+
+    def drop_schema(self):
+        with connection.cursor() as cursor:
+            cursor.execute("DROP SCHEMA IF EXISTS managed_schema CASCADE")
+
+    def table_exists(self, table_name):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass(%s)", [table_name])
+            return cursor.fetchone()[0] is not None
+
+    def column_names(self, table_name):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = %s AND table_name = %s
+                ORDER BY ordinal_position
+                """,
+                [table_name.schema, table_name.table],
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    @isolate_apps("schema_qualified_tables")
+    def test_create_query_and_delete_managed_model(self):
+        class ManagedCustomer(models.Model):
+            name = models.CharField(max_length=100)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "customer",
+                    schema="managed_schema",
+                )
+
+        with connection.schema_editor() as editor:
+            editor.create_model(ManagedCustomer)
+        self.assertTrue(self.table_exists("managed_schema.customer"))
+
+        customer = ManagedCustomer.objects.create(name="Acme")
+        self.assertEqual(ManagedCustomer.objects.get(pk=customer.pk), customer)
+
+        with connection.schema_editor() as editor:
+            editor.delete_model(ManagedCustomer)
+        self.assertFalse(self.table_exists("managed_schema.customer"))
+
+    def test_create_model_migration_forwards_and_backwards(self):
+        operation = CreateModel(
+            name="ManagedCustomer",
+            fields=[
+                ("id", models.AutoField(primary_key=True)),
+                ("name", models.CharField(max_length=100)),
+            ],
+            options={
+                "db_table": models.SchemaQualifiedTable(
+                    "migration_customer",
+                    schema="managed_schema",
+                ),
+            },
+        )
+        from_state = ProjectState()
+        to_state = from_state.clone()
+        operation.state_forwards("schema_qualified_tables", to_state)
+
+        with connection.schema_editor() as editor:
+            operation.database_forwards(
+                "schema_qualified_tables",
+                editor,
+                from_state,
+                to_state,
+            )
+        self.assertTrue(self.table_exists("managed_schema.migration_customer"))
+
+        with connection.schema_editor() as editor:
+            operation.database_backwards(
+                "schema_qualified_tables",
+                editor,
+                to_state,
+                from_state,
+            )
+        self.assertFalse(self.table_exists("managed_schema.migration_customer"))
+
+    @isolate_apps("schema_qualified_tables")
+    def test_add_alter_rename_and_remove_field(self):
+        class ManagedCustomer(models.Model):
+            name = models.CharField(max_length=100)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "customer",
+                    schema="managed_schema",
+                )
+
+        with connection.schema_editor() as editor:
+            editor.create_model(ManagedCustomer)
+
+        description = models.CharField(max_length=100, null=True)
+        description.set_attributes_from_name("description")
+        description.model = ManagedCustomer
+        with connection.schema_editor() as editor:
+            editor.add_field(ManagedCustomer, description)
+        self.assertIn("description", self.column_names(ManagedCustomer._meta.db_table))
+
+        longer_description = models.CharField(max_length=200, null=True)
+        longer_description.set_attributes_from_name("description")
+        longer_description.model = ManagedCustomer
+        with connection.schema_editor() as editor:
+            editor.alter_field(
+                ManagedCustomer,
+                description,
+                longer_description,
+            )
+
+        details = models.CharField(max_length=200, null=True)
+        details.set_attributes_from_name("details")
+        details.model = ManagedCustomer
+        with connection.schema_editor() as editor:
+            editor.alter_field(ManagedCustomer, longer_description, details)
+        self.assertIn("details", self.column_names(ManagedCustomer._meta.db_table))
+
+        with connection.schema_editor() as editor:
+            editor.remove_field(ManagedCustomer, details)
+        self.assertNotIn("details", self.column_names(ManagedCustomer._meta.db_table))

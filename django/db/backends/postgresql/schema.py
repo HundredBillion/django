@@ -171,7 +171,9 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
         new_internal_type = new_field.get_internal_type()
         old_internal_type = old_field.get_internal_type()
         # Make ALTER TYPE with IDENTITY make sense.
-        table = strip_quotes(model._meta.db_table)
+        table = model._meta.db_table
+        if isinstance(table, str):
+            table = strip_quotes(table)
         auto_field_types = {
             "AutoField",
             "BigAutoField",

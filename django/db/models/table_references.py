@@ -28,6 +28,10 @@ class SchemaQualifiedTable:
     def identity(self):
         return self.__class__, self.schema, self.table
 
+    @property
+    def identifier_parts(self):
+        return self.schema, self.table
+
     def as_sql_name(self, connection):
         if not connection.features.supports_schema_qualified_table_references:
             raise NotSupportedError(

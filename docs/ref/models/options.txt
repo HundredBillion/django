@@ -98,12 +98,12 @@ Schema-qualified table references
 
 .. class:: SchemaQualifiedTable(table, *, schema)
 
-    A reference to an existing table in a database schema. PostgreSQL supports
-    schema-qualified table references.
+    A reference to a table in a database schema. PostgreSQL supports
+    schema-qualified table references for managed and unmanaged models.
 
-Set ``db_table`` to a ``SchemaQualifiedTable`` and :attr:`.managed` to
-``False`` to map an unmanaged model to an existing schema-qualified table. For
-example:
+Set ``db_table`` to a ``SchemaQualifiedTable`` to store a managed model in a
+specific schema. The schema must already exist before the model's migration is
+applied. For example:
 
 .. code-block:: python
 
@@ -118,16 +118,17 @@ example:
                 "customer",
                 schema="billing",
             )
-            managed = False
 
 This maps the model to the SQL table reference ``"billing"."customer"``.
+Django migrations create, alter, and delete the table, but don't create or
+delete the ``billing`` schema.
 
 This is useful when the same table name exists in multiple schemas in the same
 database.
 
-The schema and table must already exist. Django doesn't create, alter, or
-delete schemas or tables referenced by ``SchemaQualifiedTable``. It also
-doesn't provide dynamic per-request schema selection.
+Set :attr:`.managed` to ``False`` to map a model to an existing
+schema-qualified table instead. Django doesn't provide dynamic per-request
+schema selection.
 
 ``db_table_comment``
 --------------------

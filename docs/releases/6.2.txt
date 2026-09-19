@@ -207,9 +207,8 @@ Migrations
 Models
 ~~~~~~
 
-* The new :class:`~django.db.models.SchemaQualifiedTable` class allows
-  unmanaged models to query existing PostgreSQL tables outside the default
-  schema.
+* The new :class:`~django.db.models.SchemaQualifiedTable` class allows managed
+  and unmanaged models to use PostgreSQL tables outside the default schema.
 
 Requests and Responses
 ~~~~~~~~~~~~~~~~~~~~~~
