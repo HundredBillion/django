@@ -21,6 +21,7 @@ from django.db.models.deletion import (
     DatabaseOnDelete,
 )
 from django.db.models.query_utils import PathInfo
+from django.db.models.table_references import SchemaQualifiedTable
 from django.db.models.utils import make_model_tuple
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -2047,6 +2048,15 @@ class ManyToManyField(RelatedField):
         elif self.db_table:
             return self.db_table
         else:
+            if isinstance(opts.db_table, SchemaQualifiedTable):
+                m2m_table_name = "%s_%s" % (opts.db_table.table, self.name)
+                return SchemaQualifiedTable(
+                    utils.truncate_name(
+                        m2m_table_name,
+                        connection.ops.max_name_length(),
+                    ),
+                    schema=opts.db_table.schema,
+                )
             m2m_table_name = "%s_%s" % (utils.strip_quotes(opts.db_table), self.name)
             return utils.truncate_name(m2m_table_name, connection.ops.max_name_length())
 

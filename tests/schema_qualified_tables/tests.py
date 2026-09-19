@@ -254,11 +254,13 @@ class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
     def setUp(self):
         with connection.cursor() as cursor:
             cursor.execute("CREATE SCHEMA managed_schema")
-        self.addCleanup(self.drop_schema)
+            cursor.execute("CREATE SCHEMA related_schema")
+        self.addCleanup(self.drop_schemas)
 
-    def drop_schema(self):
+    def drop_schemas(self):
         with connection.cursor() as cursor:
             cursor.execute("DROP SCHEMA IF EXISTS managed_schema CASCADE")
+            cursor.execute("DROP SCHEMA IF EXISTS related_schema CASCADE")
 
     def table_exists(self, table_name):
         with connection.cursor() as cursor:
@@ -277,6 +279,13 @@ class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
                 [table_name.schema, table_name.table],
             )
             return [row[0] for row in cursor.fetchall()]
+
+    def constraint_names(self, model):
+        with connection.cursor() as cursor:
+            return connection.introspection.get_constraints(
+                cursor,
+                model._meta.db_table,
+            )
 
     @isolate_apps("schema_qualified_tables")
     def test_create_query_and_delete_managed_model(self):
@@ -379,3 +388,176 @@ class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
         with connection.schema_editor() as editor:
             editor.remove_field(ManagedCustomer, details)
         self.assertNotIn("details", self.column_names(ManagedCustomer._meta.db_table))
+
+    @isolate_apps("schema_qualified_tables")
+    def test_cross_schema_foreign_key(self):
+        class Document(models.Model):
+            name = models.CharField(max_length=100)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "document",
+                    schema="managed_schema",
+                )
+
+        class Statement(models.Model):
+            document = models.ForeignKey(Document, models.CASCADE)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "statement",
+                    schema="related_schema",
+                )
+
+        class Review(models.Model):
+            note = models.CharField(max_length=100)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "review",
+                    schema="related_schema",
+                )
+
+        with connection.schema_editor() as editor:
+            editor.create_model(Document)
+            editor.create_model(Statement)
+            editor.create_model(Review)
+
+        document_field = models.ForeignKey(Document, models.CASCADE, null=True)
+        document_field.contribute_to_class(Review, "document")
+        with connection.schema_editor() as editor:
+            editor.add_field(Review, document_field)
+
+        document = Document.objects.create(name="Statement source")
+        statement = Statement.objects.create(document=document)
+        review = Review.objects.create(note="Checked", document=document)
+        self.assertEqual(
+            Statement.objects.select_related("document").get(pk=statement.pk).document,
+            document,
+        )
+        constraints = self.constraint_names(Statement)
+        self.assertTrue(
+            any(
+                details["foreign_key"] == ("document", "id")
+                for details in constraints.values()
+            )
+        )
+        self.assertEqual(
+            Review.objects.select_related("document").get(pk=review.pk).document,
+            document,
+        )
+        self.assertTrue(
+            any(
+                details["foreign_key"] == ("document", "id")
+                for details in self.constraint_names(Review).values()
+            )
+        )
+
+    @isolate_apps("schema_qualified_tables")
+    def test_automatic_many_to_many_table_uses_source_schema(self):
+        class Tag(models.Model):
+            name = models.CharField(max_length=100)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "tag",
+                    schema="managed_schema",
+                )
+
+        class Article(models.Model):
+            title = models.CharField(max_length=100)
+            tags = models.ManyToManyField(Tag)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "article",
+                    schema="related_schema",
+                )
+
+        through_table = Article.tags.through._meta.db_table
+        self.assertEqual(
+            through_table,
+            models.SchemaQualifiedTable(
+                "article_tags",
+                schema="related_schema",
+            ),
+        )
+        with connection.schema_editor() as editor:
+            editor.create_model(Tag)
+            editor.create_model(Article)
+        self.assertTrue(self.table_exists("related_schema.article_tags"))
+
+        tag = Tag.objects.create(name="Reviewed")
+        article = Article.objects.create(title="Statement")
+        article.tags.add(tag)
+        self.assertEqual(list(article.tags.all()), [tag])
+
+    @isolate_apps("schema_qualified_tables")
+    def test_indexes_and_constraints(self):
+        class ManagedCustomer(models.Model):
+            name = models.CharField(max_length=100)
+            balance = models.IntegerField()
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "customer_objects",
+                    schema="managed_schema",
+                )
+
+        class RelatedCustomer(models.Model):
+            name = models.CharField(max_length=100)
+            balance = models.IntegerField()
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "customer_objects",
+                    schema="related_schema",
+                )
+
+        index = models.Index(fields=["name"], name="managed_customer_name_idx")
+        renamed_index = models.Index(
+            fields=["name"],
+            name="managed_customer_name_renamed_idx",
+        )
+        unique = models.UniqueConstraint(
+            fields=["name"],
+            name="managed_customer_name_uniq",
+        )
+        check = models.CheckConstraint(
+            condition=models.Q(balance__gte=0),
+            name="managed_customer_balance_check",
+        )
+        with connection.schema_editor() as editor:
+            editor.create_model(ManagedCustomer)
+            editor.create_model(RelatedCustomer)
+            editor.add_index(ManagedCustomer, index)
+            editor.add_index(RelatedCustomer, index)
+            editor.add_constraint(ManagedCustomer, unique)
+            editor.add_constraint(ManagedCustomer, check)
+
+        constraints = self.constraint_names(ManagedCustomer)
+        self.assertIn(index.name, constraints)
+        self.assertIn(unique.name, constraints)
+        self.assertIn(check.name, constraints)
+
+        with connection.schema_editor() as editor:
+            editor.rename_index(ManagedCustomer, index, renamed_index)
+        self.assertIn(renamed_index.name, self.constraint_names(ManagedCustomer))
+        self.assertIn(index.name, self.constraint_names(RelatedCustomer))
+
+        with connection.schema_editor() as editor:
+            editor.remove_index(ManagedCustomer, renamed_index)
+            editor.remove_constraint(ManagedCustomer, unique)
+            editor.remove_constraint(ManagedCustomer, check)
+        constraints = self.constraint_names(ManagedCustomer)
+        self.assertNotIn(renamed_index.name, constraints)
+        self.assertNotIn(unique.name, constraints)
+        self.assertNotIn(check.name, constraints)
+        self.assertIn(index.name, self.constraint_names(RelatedCustomer))

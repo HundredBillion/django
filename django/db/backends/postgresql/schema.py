@@ -1,7 +1,7 @@
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.backends.ddl_references import IndexColumns
 from django.db.backends.postgresql.psycopg_any import sql
-from django.db.backends.utils import strip_quotes
+from django.db.backends.utils import split_identifier, strip_quotes
 
 
 class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
@@ -329,7 +329,24 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
             if concurrently
             else self.sql_delete_index
         )
-        return super()._delete_index_sql(model, name, sql)
+        statement = super()._delete_index_sql(model, name, sql)
+        schema, _ = split_identifier(model._meta.db_table)
+        if schema:
+            statement.parts["name"] = "%s.%s" % (
+                self.quote_name(schema),
+                self.quote_name(name),
+            )
+        return statement
+
+    def _rename_index_sql(self, model, old_name, new_name):
+        statement = super()._rename_index_sql(model, old_name, new_name)
+        schema, _ = split_identifier(model._meta.db_table)
+        if schema:
+            statement.parts["old_name"] = "%s.%s" % (
+                self.quote_name(schema),
+                self.quote_name(old_name),
+            )
+        return statement
 
     def _create_index_sql(
         self,

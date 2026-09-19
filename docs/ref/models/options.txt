@@ -123,12 +123,18 @@ This maps the model to the SQL table reference ``"billing"."customer"``.
 Django migrations create, alter, and delete the table, but don't create or
 delete the ``billing`` schema.
 
+Foreign keys may reference models in the same or another schema. Indexes and
+constraints are created in the model table's schema. An automatically created
+many-to-many intermediary table uses the schema of the model that declares the
+field.
+
 This is useful when the same table name exists in multiple schemas in the same
 database.
 
 Set :attr:`.managed` to ``False`` to map a model to an existing
 schema-qualified table instead. Django doesn't provide dynamic per-request
-schema selection.
+schema selection. Moving a table between schemas with
+:class:`~django.db.migrations.operations.AlterModelTable` isn't supported.
 
 ``db_table_comment``
 --------------------

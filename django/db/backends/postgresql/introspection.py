@@ -4,6 +4,7 @@ from django.db.backends.base.introspection import BaseDatabaseIntrospection
 from django.db.backends.base.introspection import FieldInfo as BaseFieldInfo
 from django.db.backends.base.introspection import TableInfo as BaseTableInfo
 from django.db.backends.postgresql.base import psycopg_version
+from django.db.backends.utils import split_identifier
 from django.db.models import DB_CASCADE, DB_SET_DEFAULT, DB_SET_NULL, DO_NOTHING, Index
 
 FieldInfo = namedtuple("FieldInfo", [*BaseFieldInfo._fields, "is_autofield", "comment"])
@@ -207,6 +208,13 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         one or more columns. Also retrieve the definition of expression-based
         indexes.
         """
+        schema_name, table_name = split_identifier(table_name)
+        if schema_name:
+            namespace_condition = "AND n.nspname = %s"
+            namespace_params = [schema_name]
+        else:
+            namespace_condition = "AND pg_catalog.pg_table_is_visible(cl.oid)"
+            namespace_params = []
         constraints = {}
         # Loop over the key table, collecting things as constraints. The column
         # array must return column names in the same order in which they were
@@ -230,11 +238,12 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                 cl.reloptions
             FROM pg_constraint AS c
             JOIN pg_class AS cl ON c.conrelid = cl.oid
+            JOIN pg_namespace AS n ON cl.relnamespace = n.oid
             WHERE cl.relname = %s
-                AND pg_catalog.pg_table_is_visible(cl.oid)
+                {namespace_condition}
                 AND c.contype != 'n'
-        """,
-            [table_name],
+        """.format(namespace_condition=namespace_condition),
+            [table_name, *namespace_params],
         )
         for constraint, columns, kind, used_cols, options in cursor.fetchall():
             constraints[constraint] = {
@@ -282,14 +291,15 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                 ) idx
                 LEFT JOIN pg_class c ON idx.indrelid = c.oid
                 LEFT JOIN pg_class c2 ON idx.indexrelid = c2.oid
+                LEFT JOIN pg_namespace n ON c.relnamespace = n.oid
                 LEFT JOIN pg_am am ON c2.relam = am.oid
                 LEFT JOIN
                     pg_attribute attr ON attr.attrelid = c.oid AND attr.attnum = idx.key
-                WHERE c.relname = %s AND pg_catalog.pg_table_is_visible(c.oid)
+                WHERE c.relname = %s {namespace_condition}
             ) s2
             GROUP BY indexname, indisunique, indisprimary, amname, exprdef, attoptions;
-        """,
-            [self.index_default_access_method, table_name],
+        """.format(namespace_condition=namespace_condition.replace("cl.", "c.")),
+            [self.index_default_access_method, table_name, *namespace_params],
         )
         for (
             index,
