@@ -1,5 +1,6 @@
 from unittest import mock
 
+from django.core.management.color import no_style
 from django.db import NotSupportedError, connection, models
 from django.db.migrations.operations.models import CreateModel
 from django.db.migrations.state import ProjectState
@@ -306,6 +307,22 @@ class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
         customer = ManagedCustomer.objects.create(name="Acme")
         self.assertEqual(ManagedCustomer.objects.get(pk=customer.pk), customer)
 
+        with connection.cursor() as cursor:
+            sequences = connection.introspection.get_sequences(
+                cursor,
+                ManagedCustomer._meta.db_table,
+            )
+        self.assertEqual(len(sequences), 1)
+        self.assertEqual(sequences[0]["table"], ManagedCustomer._meta.db_table)
+
+        flush_sql = connection.ops.sql_flush(
+            no_style(),
+            [ManagedCustomer._meta.db_table],
+            reset_sequences=True,
+        )
+        connection.ops.execute_sql_flush(flush_sql)
+        self.assertFalse(ManagedCustomer.objects.exists())
+
         with connection.schema_editor() as editor:
             editor.delete_model(ManagedCustomer)
         self.assertFalse(self.table_exists("managed_schema.customer"))
@@ -441,7 +458,14 @@ class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
         constraints = self.constraint_names(Statement)
         self.assertTrue(
             any(
-                details["foreign_key"] == ("document", "id")
+                details["foreign_key"]
+                == (
+                    models.SchemaQualifiedTable(
+                        "document",
+                        schema="managed_schema",
+                    ),
+                    "id",
+                )
                 for details in constraints.values()
             )
         )
@@ -451,9 +475,81 @@ class ManagedSchemaQualifiedTableDatabaseTests(TransactionTestCase):
         )
         self.assertTrue(
             any(
-                details["foreign_key"] == ("document", "id")
+                details["foreign_key"]
+                == (
+                    models.SchemaQualifiedTable(
+                        "document",
+                        schema="managed_schema",
+                    ),
+                    "id",
+                )
                 for details in self.constraint_names(Review).values()
             )
+        )
+        with connection.cursor() as cursor:
+            relations = connection.introspection.get_relations(
+                cursor,
+                Statement._meta.db_table,
+            )
+        self.assertEqual(
+            relations["document_id"][1],
+            models.SchemaQualifiedTable("document", schema="managed_schema"),
+        )
+
+    @isolate_apps("schema_qualified_tables")
+    def test_introspection_distinguishes_same_named_tables(self):
+        class ManagedEvent(models.Model):
+            managed_value = models.IntegerField()
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "event",
+                    schema="managed_schema",
+                )
+
+        class RelatedEvent(models.Model):
+            related_value = models.CharField(max_length=100)
+
+            class Meta:
+                app_label = "schema_qualified_tables"
+                db_table = models.SchemaQualifiedTable(
+                    "event",
+                    schema="related_schema",
+                )
+
+        with connection.schema_editor() as editor:
+            editor.create_model(ManagedEvent)
+            editor.create_model(RelatedEvent)
+
+        with connection.cursor() as cursor:
+            self.assertTrue(
+                connection.introspection.table_exists(
+                    ManagedEvent._meta.db_table,
+                    cursor,
+                )
+            )
+            self.assertTrue(
+                connection.introspection.table_exists(
+                    RelatedEvent._meta.db_table,
+                    cursor,
+                )
+            )
+            managed_columns = connection.introspection.get_table_description(
+                cursor,
+                ManagedEvent._meta.db_table,
+            )
+            related_columns = connection.introspection.get_table_description(
+                cursor,
+                RelatedEvent._meta.db_table,
+            )
+        self.assertEqual(
+            [column.name for column in managed_columns],
+            ["id", "managed_value"],
+        )
+        self.assertEqual(
+            [column.name for column in related_columns],
+            ["id", "related_value"],
         )
 
     @isolate_apps("schema_qualified_tables")

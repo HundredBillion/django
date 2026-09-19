@@ -366,10 +366,24 @@ class MigrationExecutor:
                 if should_skip_detecting_model(migration, model):
                     continue
                 db_table = model._meta.db_table
-                if fold_identifier_case:
-                    db_table = db_table.casefold()
-                if db_table not in existing_table_names:
+                if hasattr(db_table, "identifier_parts"):
+                    table_exists = self.connection.introspection.table_exists(db_table)
+                else:
+                    if fold_identifier_case:
+                        db_table = db_table.casefold()
+                    table_exists = db_table in existing_table_names
+                if not table_exists:
                     return False, project_state
+                if hasattr(db_table, "identifier_parts"):
+                    for field in model._meta.local_many_to_many:
+                        through = field.remote_field.through
+                        if (
+                            through._meta.auto_created
+                            and not self.connection.introspection.table_exists(
+                                through._meta.db_table
+                            )
+                        ):
+                            return False, project_state
                 found_create_model_migration = True
             elif isinstance(operation, migrations.AddField):
                 model = apps.get_model(migration.app_label, operation.model_name)
@@ -386,9 +400,17 @@ class MigrationExecutor:
                 # Handle implicit many-to-many tables created by AddField.
                 if field.many_to_many:
                     through_db_table = field.remote_field.through._meta.db_table
-                    if fold_identifier_case:
-                        through_db_table = through_db_table.casefold()
-                    if through_db_table not in existing_table_names:
+                    if hasattr(through_db_table, "identifier_parts"):
+                        through_table_exists = (
+                            self.connection.introspection.table_exists(through_db_table)
+                        )
+                    else:
+                        if fold_identifier_case:
+                            through_db_table = through_db_table.casefold()
+                        through_table_exists = (
+                            through_db_table in existing_table_names
+                        )
+                    if not through_table_exists:
                         return False, project_state
                     else:
                         found_add_field_migration = True

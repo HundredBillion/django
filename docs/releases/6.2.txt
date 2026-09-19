@@ -287,7 +287,9 @@ backends.
 * Third-party database backends that support
   :class:`~django.db.models.SchemaQualifiedTable` should set
   ``BaseDatabaseFeatures.supports_schema_qualified_table_references`` to
-  ``True``.
+  ``True``. They should also override
+  ``BaseDatabaseIntrospection.table_exists()`` and make table-specific
+  introspection methods understand structured table references.
 
 :mod:`django.contrib.admin`
 ---------------------------

@@ -205,7 +205,9 @@ class DatabaseOperations(BaseDatabaseOperations):
         # to truncate tables referenced by a foreign key in any other table.
         sql_parts = [
             style.SQL_KEYWORD("TRUNCATE"),
-            ", ".join(style.SQL_FIELD(self.quote_name(table)) for table in tables),
+            ", ".join(
+                style.SQL_FIELD(self.quote_table_name(table)) for table in tables
+            ),
         ]
         if reset_sequences:
             sql_parts.append(style.SQL_KEYWORD("RESTART IDENTITY"))
@@ -226,7 +228,7 @@ class DatabaseOperations(BaseDatabaseOperations):
                 "%s setval(pg_get_serial_sequence('%s','%s'), 1, false);"
                 % (
                     style.SQL_KEYWORD("SELECT"),
-                    style.SQL_TABLE(self.quote_name(table_name)),
+                    style.SQL_TABLE(self.quote_table_name(table_name)),
                     style.SQL_FIELD(column_name),
                 )
             )
