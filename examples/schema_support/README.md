@@ -64,7 +64,8 @@ To verify against the actual precursor PR rather than this fork:
 ```sh
 git fetch https://github.com/django/django.git pull/21757/head
 git worktree add --detach /tmp/django-schema-precursor FETCH_HEAD
-PYTHONPATH=/tmp/django-schema-precursor .venv/bin/python -c \
+PYTHONPATH=/tmp/django-schema-precursor .venv/bin/python \
+  examples/schema_support/manage.py shell --settings=unmanaged_settings -c \
   'import django; print(django.__file__)'
 PYTHONPATH=/tmp/django-schema-precursor .venv/bin/python \
   examples/schema_support/manage.py test unmanaged_records \
@@ -127,7 +128,11 @@ Local validation on October 12, 2026 uses Python 3.14.7 and PostgreSQL 18.
 The unmanaged example was also exercised using precursor PR #21757 at
 `78ee552ecc17b27bd002f1570e9a2eaf67e8ddf8`; this tests the precursor directly,
 not merely its attributed patch inside this fork. Test counts above describe
-this example, not Django's full suite. CI results must be checked separately.
+this example, not Django's full suite. The existing focused PostgreSQL suites
+(`schema_qualified_tables`, `migrations.test_schema_qualified_tables`,
+`introspection`, `schema`, and `postgres_tests.test_indexes`) also completed
+successfully: 345 tests run, nine skipped. Formatting, migration consistency,
+and documentation lint passed. CI results must be checked separately.
 
 The example demonstrates static PostgreSQL schemas. It does not establish
 support for dynamic tenant schemas, other database backends, full schema-aware

@@ -26,12 +26,12 @@ Files: `examples/schema_support/manage.py`, `settings.py`,
 Consumes: `models.SchemaQualifiedTable(table, schema=...)` and standard ORM APIs.
 Produces: an unmanaged-only runnable example and tests.
 
-- [ ] Create connection settings and a test asserting CRUD and joined reads.
-- [ ] Run the test before adding models and observe import failure.
-- [ ] Add unmanaged models, SQL-owned fixtures, and demonstration command.
-- [ ] Verify duplicate-name isolation, foreign-key integrity, cascade deletion,
+- [x] Create connection settings and a test asserting CRUD and joined reads.
+- [x] Run the test before adding models and observe import failure.
+- [x] Add unmanaged models, SQL-owned fixtures, and demonstration command.
+- [x] Verify duplicate-name isolation, foreign-key integrity, cascade deletion,
       and serialization with Django integration tests.
-- [ ] Run `python examples/schema_support/manage.py test unmanaged_records
+- [x] Run `python examples/schema_support/manage.py test unmanaged_records
       --settings=unmanaged_settings --noinput`; commit verified task.
 
 ### Task 2: Managed application
@@ -43,10 +43,10 @@ Files: `managed_records/models.py`, `managed_records/migrations/0001_initial.py`
 Consumes: shared settings and public migration/ORM APIs.
 Produces: two managed schema-qualified models and reversible migration evidence.
 
-- [ ] Add the managed CRUD/join test and observe missing-model failure.
-- [ ] Add Document and Statement models and migrations; rerun the test.
-- [ ] Add migration roundtrip and flush tests, then run both example apps.
-- [ ] Run `python examples/schema_support/manage.py makemigrations --check
+- [x] Add the managed CRUD/join test and observe missing-model failure.
+- [x] Add Document and Statement models and migrations; rerun the test.
+- [x] Add migration roundtrip and flush tests, then run both example apps.
+- [x] Run `python examples/schema_support/manage.py makemigrations --check
       --dry-run`; commit verified task.
 
 ### Task 3: Reviewer documentation and CI
@@ -57,14 +57,19 @@ Files: example `README.md`, `.github/workflows/schema-support.yml`,
 Consumes: verified application commands and exact test results.
 Produces: reproducible instructions, upstream scope map, and CI example steps.
 
-- [ ] Document disposable PostgreSQL setup, commands, expected output, limits,
+- [x] Document disposable PostgreSQL setup, commands, expected output, limits,
       and the RulorAI case study with exact candidate verification evidence.
-- [ ] Run unmanaged and managed examples in the existing PostgreSQL CI matrix.
-- [ ] Verify the documented commands on PostgreSQL 18; verify unmanaged example
+- [x] Add unmanaged and managed example checks to the existing PostgreSQL CI
+      matrix. Actual PostgreSQL 16/17 job results remain pending CI.
+- [x] Verify the documented commands on PostgreSQL 18; verify unmanaged example
       against an isolated checkout of upstream PR #21757 where feasible.
-- [ ] Run existing schema and migration regressions, formatting, documentation
+- [x] Run existing schema and migration regressions, formatting, documentation
       lint, and workflow syntax checks. Record precise results and limits.
-- [ ] Commit, obtain an independent whole-branch review, and resolve findings.
+- [x] Commit, obtain an independent whole-branch review, and resolve findings.
+
+Independent review reproduced eight fork tests and five precursor tests. Its
+README import-order finding was corrected and re-reviewed. No actionable
+findings remain in that review scope; remote CI remains pending.
 
 ## Review focus
 
