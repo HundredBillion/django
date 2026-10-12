@@ -1,8 +1,8 @@
-from unmanaged_records.fixtures import provision
-from unmanaged_records.models import Document, Statement
-
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+
+from ...fixtures import provision
+from ...models import Document, Statement
 
 
 class Command(BaseCommand):

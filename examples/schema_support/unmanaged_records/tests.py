@@ -1,3 +1,4 @@
+from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.writer import MigrationWriter
 from django.test import TestCase
@@ -59,3 +60,19 @@ class UnmanagedApplicationTests(TestCase):
                     exec(statement, namespace)
                 restored = eval(expression, namespace)
                 self.assertEqual(restored, model._meta.db_table)
+
+    def test_migration_reversal_preserves_external_tables_and_rows(self):
+        document = Document.objects.create(filename="externally-owned.pdf")
+        statement = Statement.objects.create(
+            document=document, reference="SYN-EXTERNAL"
+        )
+        try:
+            call_command("migrate", "unmanaged_records", "zero", verbosity=0)
+            self.assertEqual(
+                Statement.objects.select_related("document")
+                .get(pk=statement.pk)
+                .document.filename,
+                "externally-owned.pdf",
+            )
+        finally:
+            call_command("migrate", "unmanaged_records", verbosity=0)

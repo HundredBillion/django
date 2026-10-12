@@ -1,7 +1,7 @@
 import os
 
 SECRET_KEY = "synthetic-schema-support-example"
-INSTALLED_APPS = ["unmanaged_records"]
+INSTALLED_APPS = ["managed_records", "unmanaged_records"]
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
