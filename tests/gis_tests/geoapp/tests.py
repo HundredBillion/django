@@ -335,16 +335,10 @@ class SaveLoadTests(TestCase):
         for _ in range(5):
             geom = f"GEOMETRYCOLLECTION({geom})"
         obj = GeometryCollectionModel.objects.create(geom=geom)
-        with (
-            mock.patch(
-                "django.contrib.gis.geos.prototypes.io._WKBReader.limit_hex"
-            ) as hex_limit_mock,
-            mock.patch(
-                "django.contrib.gis.geos.prototypes.io._WKBReader.limit_wkb"
-            ) as wkb_limit_mock,
-        ):
+        with mock.patch(
+            "django.contrib.gis.geos.prototypes.io._WKBReader.limit"
+        ) as limit_mock:
             obj.refresh_from_db()
-        limit_mock = hex_limit_mock if hex_limit_mock.call_count else wkb_limit_mock
         limit_mock.assert_called_once()
         max_geom_collections = limit_mock.call_args.args[1]
         self.assertIsNone(max_geom_collections)
@@ -749,10 +743,9 @@ class GeoLookupTest(TestCase):
         - strings matching a json regex
         - bytes
 
-        Since this could be unexpected in a lookup context, disallow dicts
-        and strings: instead, explicitly wrap with GDALRaster() to signal that
-        a write or fetch is expected. Bytes only write to the in-memory virtual
-        filesystem, so allow them.
+        Since this could be unexpected in a lookup context, disallow dicts,
+        bytes, and strings: instead, explicitly wrap with GDALRaster() to
+        signal that a write or fetch is expected.
 
         Disallowing strings also disallows paths to local or network rasters,
         but those didn't work in the lookup context anyway, since they were
@@ -790,23 +783,18 @@ class GeoLookupTest(TestCase):
             "/vsis3/someurl",
             vsimem_path,
             existing_path,
+            existing_path.read_bytes(),
+            b"POINT (invalid)",
         ]
         for obj in disallowed_cases:
-            try:
-                msg_obj = json.loads(obj)
-            except Exception:
-                if isinstance(obj, Path):
-                    msg_obj = str(obj)
-                else:
-                    msg_obj = obj
             msg = (
-                f"Cannot use object {msg_obj!r} for a spatial lookup parameter. "
-                "If this is a raster, wrap it with GDALRaster() before using "
-                "it in a lookup to enable writing or fetching."
+                r"Cannot use object .* for a spatial lookup parameter\. If "
+                r"this is a raster, wrap it with GDALRaster\(\) before using "
+                r"it in a lookup to enable writing or fetching\."
             )
             with (
                 self.subTest(obj=obj),
-                self.assertRaisesMessage(DisallowedRasterLookup, msg),
+                self.assertRaisesRegex(DisallowedRasterLookup, msg),
             ):
                 State.objects.filter(poly__intersects=obj)
 
@@ -816,12 +804,14 @@ class GeoLookupTest(TestCase):
             with self.subTest(obj=obj), self.assertRaisesMessage(ValueError, msg):
                 State.objects.filter(poly__intersects=obj)
 
-    def test_lookup_allows_writing_raster_from_bytes(self):
-        raster_path = Path(__file__).parent.parent / "data" / "rasters" / "raster.tif"
-        with open(raster_path, "rb") as raster_file:
-            raster_bytes = raster_file.read()
-        # Just get SQL to avoid gating on connection.supports_raster.
-        State.objects.filter(poly__intersects=raster_bytes).query
+    def test_lookup_rejected_value_repr_is_truncated(self):
+        value = b"x" * 5000
+        with self.assertRaises(DisallowedRasterLookup) as ctx:
+            State.objects.filter(poly__intersects=value)
+
+        message = str(ctx.exception)
+        self.assertIn("… <trimmed 5003 bytes string>", message)
+        self.assertNotIn("x" * 4097, message)
 
     def test_lookup_allows_geos_geometry_string(self):
         geojson = json.dumps({"type": "Point", "coordinates": [2, 49]})
@@ -950,18 +940,26 @@ class GeoQuerySetTest(TestCase):
             name="Forney",
         )
         tx = Country.objects.get(name="Texas").mpoly
-        # Tolerance is greater than distance between Forney and Dallas, that's
-        # why Dallas is ignored.
+        # Tolerance is greater than the distance between Forney and Dallas, so
+        # either one may be ignored.
         forney_houston = GEOSGeometry(
             "MULTIPOINT(-95.363151 29.763374, -96.467222 32.751389)",
             srid=4326,
         )
+        forney_houston.normalize()
+        dallas_houston = GEOSGeometry(
+            "MULTIPOINT(-95.363151 29.763374, -96.801611 32.782057)",
+            srid=4326,
+        )
+        dallas_houston.normalize()
+        result = City.objects.filter(point__within=tx).aggregate(
+            Union("point", tolerance=32000),
+        )["point__union"]
+        result.normalize()
         self.assertIs(
-            forney_houston.equals_exact(
-                City.objects.filter(point__within=tx).aggregate(
-                    Union("point", tolerance=32000),
-                )["point__union"],
-                tolerance=10e-6,
+            any(
+                expected.equals_exact(result, tolerance=10e-6)
+                for expected in (forney_houston, dallas_houston)
             ),
             True,
         )

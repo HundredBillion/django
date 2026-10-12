@@ -1029,6 +1029,56 @@ class TestQuerying(TestCase):
                     NullableJSONModel.objects.filter(value__in=lookup_value), expected
                 )
 
+    @skipUnlessDBFeature("supports_primitives_in_json_field")
+    @skipIfDBFeature("has_native_json_field")
+    def test_in_value_without_explicit_output_field(self):
+        tests = [
+            ([Value(True)], [self.objs[8]]),
+            ([Value(False)], [self.objs[9]]),
+            ([Value("yes")], [self.objs[10]]),
+            ([Value(7)], [self.objs[11]]),
+            ([Value(9.6)], [self.objs[12]]),
+        ]
+        for lookup_value, expected in tests:
+            with self.subTest(value__in=lookup_value), transaction.atomic():
+                self.assertSequenceEqual(
+                    NullableJSONModel.objects.filter(value__in=lookup_value), expected
+                )
+
+    @skipUnlessDBFeature("supports_primitives_in_json_field")
+    @skipIfDBFeature("has_native_json_field")
+    def test_in_value_explicit_output_field(self):
+        tests = [
+            ([Value("7", output_field=IntegerField())], [self.objs[11]]),
+            ([Value("yes", output_field=models.CharField())], [self.objs[10]]),
+            # None with anything but JSONField is almost certainly not what the
+            # user intends--nothing is IN (NULL)--but it shouldn't crash.
+            ([Value(None, output_field=models.CharField())], []),
+        ]
+        for lookup_value, expected in tests:
+            with self.subTest(value__in=lookup_value), transaction.atomic():
+                self.assertSequenceEqual(
+                    NullableJSONModel.objects.filter(value__in=lookup_value), expected
+                )
+
+    def test_in_json_whitespace(self):
+        tests = [
+            ('{"a":1}', {"a": 1}),
+            ('{ "a" : 1 }', {"a": 1}),
+            ("[1,2]", [1, 2]),
+            ("[ 1, 2 ]", [1, 2]),
+        ]
+        for raw, value in tests:
+            with self.subTest(raw=raw):
+                # Use RawSQL to avoid whitespace from Django's serialization.
+                obj = NullableJSONModel.objects.create(
+                    value=RawSQL(self.raw_sql, [raw]),
+                )
+                self.assertSequenceEqual(
+                    NullableJSONModel.objects.filter(pk=obj.pk, value__in=[value]),
+                    [obj],
+                )
+
     def test_key_in(self):
         tests = [
             ("value__c__in", [14], self.objs[3:5]),
@@ -1150,6 +1200,46 @@ class TestQuerying(TestCase):
         self.assertEqual(
             NullableJSONModel.objects.filter(value__o='"quoted"').get(),
             self.objs[4],
+        )
+
+    def test_key_transform_int4_range_overflow(self):
+        # A purely numeric key segment is parsed as an array index. If that
+        # index is outside the range of integer this database's JSON path
+        # support can handle natively (PostgreSQL's int4 range; Oracle's JSON
+        # path parser has its own, much larger, limit), the lookup must not
+        # match rather than error.
+        out_of_range_key = max(connection.ops.integer_field_range("IntegerField")) + 1
+        key = str(out_of_range_key)
+        obj = NullableJSONModel.objects.create(value={key: "x"})
+        self.assertFalse(
+            NullableJSONModel.objects.filter(**{f"value__{key}": "x"}).exists()
+        )
+        if connection.features.supports_json_field_contains:
+            self.assertCountEqual(
+                NullableJSONModel.objects.filter(value__contains={key: "x"}), [obj]
+            )
+
+    def test_key_transform_int4_range_overflow_isnull(self):
+        # __isnull on a key segment outside the range in
+        # test_key_transform_int4_range_overflow() must not match rather than
+        # error, the same as an ordinary exact lookup on that key.
+        out_of_range_key = max(connection.ops.integer_field_range("IntegerField")) + 1
+        key = str(out_of_range_key)
+        obj = NullableJSONModel.objects.create(value={key: "x"})
+        self.assertTrue(
+            NullableJSONModel.objects.filter(
+                pk=obj.pk, **{f"value__{key}__isnull": True}
+            ).exists(),
+        )
+
+    def test_key_transform_int4_range_overflow_isnull_ancestor(self):
+        out_of_range_key = max(connection.ops.integer_field_range("IntegerField")) + 1
+        key = str(out_of_range_key)
+        obj = NullableJSONModel.objects.create(value={"other": {"x": "y"}})
+        self.assertTrue(
+            NullableJSONModel.objects.filter(
+                pk=obj.pk, **{f"value__{key}__x__isnull": True}
+            ).exists(),
         )
 
     @skipUnlessDBFeature("has_json_operators")
