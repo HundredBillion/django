@@ -67,6 +67,20 @@ jobs:
           --settings=schema_qualified_tables.postgresql_settings
           --verbosity 2
           --parallel 2
+      - name: Run application examples
+        env:
+          PGDATABASE: postgres
+          PGHOST: 127.0.0.1
+          PGPASSWORD: postgres
+          PGPORT: "5432"
+          PGUSER: postgres
+        run: |
+          python examples/schema_support/manage.py test unmanaged_records --settings=unmanaged_settings --noinput -v2
+          python examples/schema_support/manage.py test managed_records unmanaged_records --noinput -v2
+          python examples/schema_support/manage.py makemigrations --check --dry-run
+          python examples/schema_support/manage.py migrate --noinput
+          python examples/schema_support/manage.py demo_unmanaged --settings=unmanaged_settings
+          python examples/schema_support/manage.py demo_managed
 
   compatibility:
     name: SQLite compatibility, Python 3.12

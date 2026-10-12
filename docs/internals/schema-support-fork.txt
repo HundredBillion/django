@@ -115,6 +115,13 @@ test database.
 Application integration
 =======================
 
+The fork includes a runnable application in ``examples/schema_support/``.
+Its README contains setup commands, a capability map, and a RulorAI case study.
+An independent settings module exercises unmanaged tables using only the
+precursor pull request's public API. The managed example additionally exercises
+cross-schema relations, field migration reversal and reapplication, and flush.
+Both use synthetic data and dedicated PostgreSQL test databases.
+
 Applications should isolate the fork-specific API behind a small compatibility
 module containing approved schema constants and a startup feature check. Domain
 code should import only :class:`~django.db.models.SchemaQualifiedTable`, not
