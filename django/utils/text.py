@@ -4,6 +4,7 @@ import secrets
 import textwrap
 import unicodedata
 from collections import deque
+from functools import cached_property
 from gzip import GzipFile
 from gzip import compress as gzip_compress
 from html import escape
@@ -12,12 +13,7 @@ from io import BytesIO
 
 from django.core.exceptions import SuspiciousFileOperation
 from django.utils.asyncio import maybe_aclosing
-from django.utils.functional import (
-    SimpleLazyObject,
-    cached_property,
-    keep_lazy_text,
-    lazy,
-)
+from django.utils.functional import SimpleLazyObject, keep_lazy_text, lazy
 from django.utils.regex_helper import _lazy_re_compile
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy, pgettext
@@ -260,6 +256,23 @@ class Truncator(SimpleLazyObject):
             words = words[:length]
             return add_truncation_text(" ".join(words), truncate)
         return " ".join(words)
+
+
+def trim_value(value, limit=4096):
+    """Trim string `value` to `limit` characters.
+
+    Return the trimmed value and suffix noting how many chars were trimmed
+    (empty when no trimming was done).
+
+    Non-string values are returned unchanged and suffix is the empty string.
+    """
+    suffix = ""
+    if isinstance(value, str) and (value_len := len(value)) > limit:
+        value, suffix = (
+            value[:limit],
+            f"… <trimmed {value_len - limit} chars out of {value_len}>",
+        )
+    return value, suffix
 
 
 @keep_lazy_text

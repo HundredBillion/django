@@ -1129,6 +1129,23 @@ class CustomPrefetchTests(TestCase):
             with self.assertNumQueries(0):
                 self.assertEqual(person.cached_all_houses, all_houses)
 
+    # RemovedInDjango2029Warning: When the deprecation ends, remove this test.
+    def test_to_attr_django_cached_property(self):
+        with self.assertNumQueries(2):
+            persons = list(
+                Person.objects.prefetch_related(
+                    Prefetch(
+                        "houses",
+                        House.objects.all(),
+                        to_attr="django_cached_all_houses",
+                    ),
+                )
+            )
+        for person in persons:
+            all_houses = list(House.objects.filter(occupants=person))
+            with self.assertNumQueries(0):
+                self.assertEqual(person.django_cached_all_houses, all_houses)
+
     def test_filter_deferred(self):
         """
         Related filtering of prefetched querysets is deferred until necessary.

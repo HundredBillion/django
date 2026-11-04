@@ -99,6 +99,11 @@ class CommentSyntaxTests(SimpleTestCase):
         output = self.engine.render_to_string("comment")
         self.assertEqual(output, "visible")
 
+    @setup({"comment": "{% comment %}content{%\nendcomment\n%}"})
+    def test_multiline_raw_block_closing_tags(self):
+        output = self.engine.render_to_string("comment")
+        self.assertEqual(output, "")
+
     @setup(
         {
             "comment": (
@@ -116,3 +121,15 @@ class CommentSyntaxTests(SimpleTestCase):
     def test_literal_multiline_block_opener_in_raw_blocks(self):
         output = self.engine.render_to_string("comment")
         self.assertEqual(output, "")
+
+    @setup(
+        {
+            "no_spaces": "{%comment%}{% hidden{%endcomment%}visible",
+            "no_spaces_in_closing_tag": "{% comment %}{% hidden{%endcomment%}visible",
+        }
+    )
+    def test_tags_without_spaces(self):
+        for template_name in ("no_spaces", "no_spaces_in_closing_tag"):
+            with self.subTest(template_name=template_name):
+                output = self.engine.render_to_string(template_name)
+                self.assertEqual(output, "visible")

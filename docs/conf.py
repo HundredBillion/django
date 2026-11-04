@@ -40,7 +40,7 @@ import github_links  # NOQA
 # -- General configuration --
 
 # If your documentation needs a minimal Sphinx version, state it here.
-needs_sphinx = "7.3.0"
+needs_sphinx = "8.2.0"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
@@ -169,8 +169,7 @@ locale_dirs = ["locale/"]
 today_fmt = "%B %d, %Y"
 
 # List of patterns, relative to source directory, that match files and
-# directories to ignore when looking for source files. If this changes, be sure
-# to update similar exclusions in Makefile, make.bat, and lint.py.
+# directories to ignore when looking for source files.
 exclude_patterns = ["_build", "_ext", "_static", "_theme", "requirements.txt"]
 
 # The reST default role (used for this markup: `text`) to use for all
@@ -238,6 +237,8 @@ html_theme_path = ["_theme"]
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
+# All files in html_static_path are bundled into epub as well. Use
+# epub_exclude_files for any that are not epub compatible.
 html_static_path = ["_static"]
 
 html_css_files = [
@@ -435,7 +436,12 @@ epub_cover = ("", "epub-cover.html")
 # epub_post_files = []
 
 # A list of files that should not be packed into the epub file.
-# epub_exclude_files = []
+epub_exclude_files = [join("_static", "console-tabs.css")]
+
+# Empty, rather than defaulting to html_css_files, because its only entry is
+# the console-tabs.css excluded above. Any epub compatible addition to
+# html_css_files needs repeating here.
+epub_css_files = []
 
 # The depth of the table of contents in toc.ncx.
 # epub_tocdepth = 3
